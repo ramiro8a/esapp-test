@@ -1,0 +1,440 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Payment & Risk Evaluation Microservices API",
+    "description": "Sistema de procesamiento de pagos con evaluación automática de riesgos en tiempo real. Detecta fraudes y transacciones sospechosas mediante integración asincrónica vía Kafka.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "Payment Team",
+      "url": "https://github.com"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:5000",
+      "description": "Payment Service - Local Development"
+    },
+    {
+      "url": "http://localhost:5001",
+      "description": "Risk Evaluation Service - Local Development"
+    }
+  ],
+  "paths": {
+    "/api/v1/payments": {
+      "post": {
+        "tags": [
+          "Payments"
+        ],
+        "summary": "Crear nuevo pago",
+        "description": "Crea un nuevo pago con estado 'evaluating' y lo envía automáticamente al servicio de evaluación de riesgos via Kafka. El servicio espera la respuesta asincronamente para actualizar el estado del pago a 'accepted' o 'denied'.",
+        "operationId": "createPayment",
+        "requestBody": {
+          "description": "Datos requeridos para crear el pago",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePaymentRequest"
+              },
+              "examples": {
+                "ejemplo1": {
+                  "summary": "Pago por tarjeta de crédito",
+                  "value": {
+                    "customerId": "550e8400-e29b-41d4-a716-446655440000",
+                    "serviceProviderId": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+                    "paymentMethodId": 1,
+                    "amount": 1500.50
+                  }
+                },
+                "ejemplo2": {
+                  "summary": "Pago por transferencia bancaria",
+                  "value": {
+                    "customerId": "550e8400-e29b-41d4-a716-446655440001",
+                    "serviceProviderId": "6ba7b810-9dad-11d1-80b4-00c04fd430c9",
+                    "paymentMethodId": 2,
+                    "amount": 5000.00
+                  }
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Pago creado exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentResponse"
+                },
+                "example": {
+                  "externalOperationId": "d2a6dd74-6ac4-41b3-bab2-e15ab4d380d2",
+                  "createdAt": "2025-10-30T14:20:06Z",
+                  "status": "evaluating",
+                  "amount": 1500.50
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error en los datos proporcionados o en la solicitud",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Error interno del servidor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/payments/{externalOperationId}": {
+      "get": {
+        "tags": [
+          "Payments"
+        ],
+        "summary": "Consultar pago por ID",
+        "description": "Obtiene el estado actual del pago incluyendo si fue aceptado o rechazado. Estados posibles: 'evaluating' (en evaluación), 'accepted' (aceptado), 'denied' (rechazado).",
+        "operationId": "getPayment",
+        "parameters": [
+          {
+            "name": "externalOperationId",
+            "in": "path",
+            "description": "ID único de la operación de pago (GUID)",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "example": "d2a6dd74-6ac4-41b3-bab2-e15ab4d380d2"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pago encontrado con sus detalles",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Pago no encontrado con ese ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error en la solicitud",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/RiskEvaluation/evaluate": {
+      "post": {
+        "tags": [
+          "Risk Evaluation"
+        ],
+        "summary": "Evaluar riesgo de pago",
+        "description": "Endpoint directo para evaluar el riesgo de un pago. También puede ser utilizado internamente por el servicio de Kafka. Analiza el monto, patrón de cliente y método de pago para detectar fraudes y transacciones sospechosas.",
+        "operationId": "evaluateRisk",
+        "requestBody": {
+          "description": "Datos del pago a evaluar",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RiskEvaluationRequest"
+              },
+              "example": {
+                "externalOperationId": "d2a6dd74-6ac4-41b3-bab2-e15ab4d380d2",
+                "customerId": "550e8400-e29b-41d4-a716-446655440000",
+                "amount": 1500.50
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Evaluación completada exitosamente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RiskEvaluationResponse"
+                },
+                "examples": {
+                  "aceptado": {
+                    "summary": "Pago aceptado",
+                    "value": {
+                      "externalOperationId": "d2a6dd74-6ac4-41b3-bab2-e15ab4d380d2",
+                      "status": "accepted"
+                    }
+                  },
+                  "rechazado": {
+                    "summary": "Pago rechazado",
+                    "value": {
+                      "externalOperationId": "d2a6dd74-6ac4-41b3-bab2-e15ab4d380d2",
+                      "status": "denied"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error en los datos proporcionados",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CreatePaymentRequest": {
+        "type": "object",
+        "title": "Solicitud de Pago",
+        "description": "Datos requeridos para crear un nuevo pago",
+        "required": [
+          "customerId",
+          "serviceProviderId",
+          "paymentMethodId",
+          "amount"
+        ],
+        "properties": {
+          "customerId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID único del cliente que realiza el pago",
+            "example": "550e8400-e29b-41d4-a716-446655440000"
+          },
+          "serviceProviderId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID único del proveedor de servicios que recibe el pago",
+            "example": "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+          },
+          "paymentMethodId": {
+            "type": "integer",
+            "enum": [
+              1,
+              2,
+              3
+            ],
+            "description": "Identificador del método de pago. 1 = Tarjeta de crédito, 2 = Transferencia bancaria, 3 = Billetera digital",
+            "example": 1
+          },
+          "amount": {
+            "type": "number",
+            "format": "decimal",
+            "description": "Monto del pago en Bs (Bolivianos). Debe ser mayor que 0",
+            "example": 1500.50,
+            "minimum": 0.01
+          }
+        }
+      },
+      "PaymentResponse": {
+        "type": "object",
+        "title": "Respuesta de Pago",
+        "description": "Datos de un pago con su estado actual",
+        "required": [
+          "externalOperationId",
+          "createdAt",
+          "status",
+          "amount"
+        ],
+        "properties": {
+          "externalOperationId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID único de la operación de pago generado por el sistema",
+            "example": "d2a6dd74-6ac4-41b3-bab2-e15ab4d380d2"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Fecha y hora UTC en que se creó el pago",
+            "example": "2025-10-30T14:20:06Z"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "evaluating",
+              "accepted",
+              "denied"
+            ],
+            "description": "Estado actual del pago: 'evaluating' (en evaluación), 'accepted' (aceptado), 'denied' (rechazado)",
+            "example": "accepted"
+          },
+          "amount": {
+            "type": "number",
+            "format": "decimal",
+            "description": "Monto del pago en Bs (Bolivianos)",
+            "example": 1500.50
+          }
+        }
+      },
+      "RiskEvaluationRequest": {
+        "type": "object",
+        "title": "Solicitud de Evaluación de Riesgo",
+        "description": "Datos para evaluar el riesgo de un pago",
+        "required": [
+          "externalOperationId",
+          "customerId",
+          "amount"
+        ],
+        "properties": {
+          "externalOperationId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID único de la operación de pago",
+            "example": "d2a6dd74-6ac4-41b3-bab2-e15ab4d380d2"
+          },
+          "customerId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID del cliente realizando el pago",
+            "example": "550e8400-e29b-41d4-a716-446655440000"
+          },
+          "amount": {
+            "type": "number",
+            "format": "decimal",
+            "description": "Monto del pago en Bs (Bolivianos)",
+            "example": 1500.50
+          }
+        }
+      },
+      "RiskEvaluationResponse": {
+        "type": "object",
+        "title": "Respuesta de Evaluación de Riesgo",
+        "description": "Resultado de la evaluación de riesgo de un pago",
+        "required": [
+          "externalOperationId",
+          "status"
+        ],
+        "properties": {
+          "externalOperationId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID de la operación de pago evaluada",
+            "example": "d2a6dd74-6ac4-41b3-bab2-e15ab4d380d2"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "denied"
+            ],
+            "description": "Resultado de la evaluación: 'accepted' (pago aprobado), 'denied' (pago rechazado)",
+            "example": "accepted"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "title": "Respuesta de Error",
+        "description": "Estructura estándar para respuestas de error",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Mensaje de error principal",
+            "example": "Error al procesar la solicitud de pago"
+          },
+          "details": {
+            "type": "string",
+            "description": "Detalles adicionales del error",
+            "example": "El monto no puede ser negativo"
+          },
+          "externalOperationId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "ID de la operación si es aplicable",
+            "example": "d2a6dd74-6ac4-41b3-bab2-e15ab4d380d2"
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Payments",
+      "description": "Gestión de pagos - Crear, consultar y rastrear pagos"
+    },
+    {
+      "name": "Risk Evaluation",
+      "description": "Evaluación de riesgos - Detectar fraudes y transacciones sospechosas"
+    }
+  ],
+  "x-services": {
+    "PaymentService": {
+      "description": "Microservicio de pagos - Gestiona la creación y consulta de pagos",
+      "port": 5000,
+      "database": "PostgreSQL (payment_service)",
+      "messaging": "Kafka",
+      "key_features": [
+        "Crear pagos con estado inicial 'evaluating'",
+        "Enviar solicitudes de evaluación a través de Kafka",
+        "Consultar estado de pagos",
+        "Actualizar estado basado en respuestas de evaluación"
+      ]
+    },
+    "RiskEvaluationService": {
+      "description": "Microservicio de evaluación de riesgos - Analiza y evalúa pagos para detectar fraudes",
+      "port": 5001,
+      "database": null,
+      "messaging": "Kafka",
+      "key_features": [
+        "Escuchar solicitudes de evaluación vía Kafka",
+        "Evaluar riesgo basado en monto, patrón de cliente y otros factores",
+        "Responder con status 'accepted' o 'denied'",
+        "Endpoint directo de evaluación via HTTP"
+      ]
+    }
+  },
+  "x-communication-flow": {
+    "sync_flow": [
+      "Cliente → POST /api/v1/payments",
+      "PaymentService crea pago con status 'evaluating'",
+      "PaymentService → GET /api/v1/payments/{id} retorna pago actual"
+    ],
+    "async_flow": [
+      "PaymentService publica mensaje en Kafka topic 'payment-evaluation-requests'",
+      "RiskEvaluationService consume el mensaje",
+      "RiskEvaluationService evalúa el riesgo",
+      "RiskEvaluationService publica respuesta en Kafka topic 'payment-evaluation-responses'",
+      "PaymentService consume la respuesta",
+      "PaymentService actualiza estado del pago a 'accepted' o 'denied'",
+      "Siguientes GETs retornan estado actualizado"
+    ]
+  }
+}

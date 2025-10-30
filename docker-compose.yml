@@ -1,0 +1,114 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: payment-db
+    environment:
+      POSTGRES_DB: payment_service
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: payment-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: payment-kafka
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kafka-topics-setup:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka-topics-setup
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: /bin/sh
+    command: |
+      -c "
+      echo 'Creando tópicos...'
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic risk-evaluation-request --partitions 1 --replication-factor 1
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic risk-evaluation-response --partitions 1 --replication-factor 1
+      echo '✅ Tópicos creados'
+      "
+    restart: "no"
+
+  payment-api:
+    build:
+      context: ./PaymentService
+      dockerfile: Dockerfile
+    container_name: payment-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-topics-setup:
+        condition: service_completed_successfully
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__PostgreSQL: "Host=postgres;Port=5432;Database=payment_service;Username=postgres;Password=postgres"
+      Kafka__BootstrapServers: "kafka:29092"
+    ports:
+      - "8080:5000"
+    restart: unless-stopped
+
+  risk-evaluator:
+    build:
+      context: ./RiskEvaluationService
+      dockerfile: Dockerfile
+    container_name: risk-evaluator
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-topics-setup:
+        condition: service_completed_successfully
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__PostgreSQL: "Host=postgres;Port=5432;Database=payment_service;Username=postgres;Password=postgres"
+      Kafka__BootstrapServers: "kafka:29092"
+    restart: unless-stopped
+
+  kafdrop:
+    image: obsidiandynamics/kafdrop:latest
+    container_name: payment-kafdrop
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BROKERCONNECT: kafka:29092
+      JVM_OPTS: "-Xms32M -Xmx64M"
+      SERVER_SERVLET_CONTEXTPATH: "/"
+    ports:
+      - "9000:9000"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  default:
+    name: payment-network

@@ -1,0 +1,32 @@
+# Carpetas de compilación
+bin/
+obj/
+
+# Archivos de compilación
+*.dll
+*.exe
+*.pdb
+*.cache
+
+# Visual Studio
+.vs/
+.vscode/
+*.user
+*.suo
+
+# NuGet
+packages/
+.nuget/
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Archivos temporales
+*.tmp
+*.log
